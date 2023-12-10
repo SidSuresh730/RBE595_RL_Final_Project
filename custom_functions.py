@@ -216,6 +216,8 @@ class Episode:
         return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
 
 '''
+
+lol
 # Not sure if we need this directly. But I coded the Adam algorithm from the paper. The objective
 # function is something that I am still confused about but looks like torch have a built in attr optim.Adam()
 # that we can use as well https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
