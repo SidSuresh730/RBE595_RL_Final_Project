@@ -18,7 +18,7 @@ import custom_functions as custom
 client = airsim.MultirotorClient()
 client.confirmConnection()
 client.enableApiControl(True)
-gp = custom.Episode(client=client,n=2)
+gp = custom.Episode(client=client,n=3)
 # startPose1 = client.simGetObjectPose("PlayerStart1")
 # s = pprint.pformat(startPose1)
 # print("start pose: %s" % s)
@@ -58,7 +58,8 @@ airsim.wait_key('Press any key to follow the global path')
 for i in range(0,50):
     p = gp.get_moving_setpoint(timestep=i)
     x,y,z = p.x_val,p.y_val,p.z_val
-    client.moveToPositionAsync(x=x,y=y,z=z,velocity=1.0).join()
+    client.moveToPositionAsync(x=x,y=y,z=z,velocity=5.0).join()
+    print(client.simGetCollisionInfo().has_collided)
 
 # state = client.getMultirotorState()
 # print("state: %s" % pprint.pformat(state))

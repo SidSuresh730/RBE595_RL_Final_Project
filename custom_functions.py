@@ -12,6 +12,8 @@ DEL_D_U = 1.0
 R_DP = -0.5
 R_CP = -1.0
 N = 1.0
+N_MIN_INTERACTIONS = 64
+DELTA = 1.0
 # Motion primitive constants
 NODES_0 = np.array([[0.0,0.0,0.0]])
 NODES_1 = np.array([[0.0,0.0,-i] for i in np.arange(0.0,N+.01,0.01)])
@@ -184,11 +186,11 @@ def get_moving_setpoint(client:airsim.MultirotorClient,global_path:airsim.Vector
 # returns index of action to take based on epsilon-greedy policy
 # input: q function, state, epsilon
 # output: index of action to be taken
-def epsilon_greedy(q,s,epsilon):
-    s = (s[0],s[1])
+def epsilon_greedy(q_s,epsilon):
+    # s = (s[0],s[1])
     mag_A = len(NODES_LIST)
     # print("mag_A: ", mag_A)
-    a_star = np.argmax(q[s])
+    a_star = np.argmax(q_s)
     weights = np.zeros(mag_A)+epsilon/mag_A
     weights[a_star]=1-epsilon+epsilon/mag_A 
     return np.random.choice(mag_A,p=weights)
@@ -207,6 +209,7 @@ class Episode:
         self.client.takeoffAsync().join()
         self.start_pose = self.client.getMultirotorState().kinematics_estimated.position
         self.global_path = self.goal_pose.position-self.start_pose
+
     # calculates moving setpoint for timestep in world frame
     # input: client, global_path, timestep
     # output: moving setpoint in world frame, maxed at the end goal
@@ -214,4 +217,19 @@ class Episode:
         gp_unit = self.global_path/self.global_path.get_length()
         sp = gp_unit*timestep
         return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
+    
+    def run_DQN(self):
+        pass
+    
+    # logic to determine if drone has collided with an object that is not the goal
+    # returns True if drone has collided with an obstacle
+    def hasCollided(self) -> bool:
+        collision_info = self.client.simGetCollisionInfo()
+        return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1]
+    
+    # logic to determine if drone has collided with the goal
+    # returns True if drone has reached the goal 
+    def reachedGoal(self) -> bool:
+        collision_info = self.client.simGetCollisionInfo()
+        return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
     
