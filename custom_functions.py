@@ -13,13 +13,13 @@ R_DP = -0.5
 R_CP = -1.0
 N = 1.0
 MIN_INTERACTION_LIMIT = 64
-DELTA = 1.0
+LEARNING_RATE = 1.0
 EPISODES = 2000 
-update_frequency = 100  # Update every 100 episodes
-GAMMA = 0.99 # default
-learning_rate = 0.001 # default
+UPDATE_FREQUENCY = 100  # Update every 100 episodes
+GAMMA = 0.5
 N_ROWS = 32
 N_COLS = 32
+NUM_EPISODES = 2000
 # image neural network layer sizes
 IMG_NN_INPUT = N_ROWS*N_COLS
 IMG_NN_H1 = 128
@@ -209,9 +209,9 @@ def init_episode(client: airsim.MultirotorClient, i: int) -> airsim.Vector3r:
     return goal_pose.position-client.getMultirotorState().kinematics_estimated.position
 
 # calculates moving setpoint for timestep in world frame
-# input: client, global_path, timestep
+# input: global_path, timestep
 # output: moving setpoint in world frame, maxed at the end goal
-def get_moving_setpoint(client:airsim.MultirotorClient,global_path:airsim.Vector3r,timestep:int) -> airsim.Vector3r:
+def get_moving_setpoint(global_path:airsim.Vector3r,timestep:int) -> airsim.Vector3r:
     gp_unit = global_path/global_path.get_length()
     sp = gp_unit*timestep
     return min(np.array([global_path,sp]),key=lambda p: p.get_length())
@@ -234,25 +234,45 @@ class Episode:
     # output: None
     def __init__(self,client: airsim.MultirotorClient, n:int) -> None:
         self.n = n
+        self.t = 0
         self.client = client
         start = client.simGetObjectPose(STARTS[n-1])
         self.goal_pose = client.simGetObjectPose(GOALS[n-1])
         self.client.simSetVehiclePose(start,ignore_collision=True)
         self.client.armDisarm(True)
         self.client.takeoffAsync().join()
-        self.start_pose = self.client.getMultirotorState().kinematics_estimated.position
-        self.global_path = self.goal_pose.position-self.start_pose
+        self.start_pos = self.client.getMultirotorState().kinematics_estimated.position
+        self.global_path = self.goal_pose.position-self.start_pos
+        im1,im2,im3 = execute_motion_primitive(self.client,0,vel=1.0)
+        sp = self.get_moving_setpoint(self.t)
+        rel_pos = calculate_relative_pos(self.client,sp)
+        self.state = State(im1,im2,im3,rel_pos,sp)
 
     # calculates moving setpoint for timestep in world frame
     # input: client, global_path, timestep
     # output: moving setpoint in world frame, maxed at the end goal
     def get_moving_setpoint(self,timestep) -> airsim.Vector3r:
         gp_unit = self.global_path/self.global_path.get_length()
-        sp = gp_unit*timestep
+        sp = gp_unit*(timestep+1)
         return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
     
-    def step(self,a):
-        execute_motion_primitive(client=self.client,i=a,vel=1.0)
+    # steps through episode
+    # input: action to take 
+    # output: next state, reward
+    def step(self,a:int) -> tuple:
+        d_t_min = self.state.get_dist()
+        sp = self.state.get_sp()
+        img1,img2,img3 = execute_motion_primitive(client=self.client,i=a,vel=1.0)
+        d_t = calculate_relative_pos(self.client,sp).get_length()
+        collided = self.hasCollided()
+        done = self.reachedGoal()
+        r = reward_function(d_t_min=d_t_min,d_t=d_t,collision=collided)
+        self.t+=1
+        new_sp = self.get_moving_setpoint(self.t)
+        rel_pos = calculate_relative_pos(self.client,new_sp)
+        new_state = State(img1=img1,img2=img2,img3=img3,pos=rel_pos,sp=new_sp)
+        return (new_state,r,done)
+
     
     # logic to determine if drone has collided with an object that is not the goal
     # returns True if drone has collided with an obstacle
@@ -266,15 +286,25 @@ class Episode:
         collision_info = self.client.simGetCollisionInfo()
         return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
 
+# class to hold state data for use in NN and reward function
 class State:
-    def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r) -> None:
+    def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r,sp:airsim.Vector3r) -> None:
         self.img1 = img1
         self.img2 = img2
         self.img3 = img3
+        # relative pos
         self.pos = pos
+        # moving setpoint
+        self.sp = sp
     
-    def get_inputs(self):
+    def get_inputs(self) -> tuple:
         return (self.img1,self.img2,self.img3,self.pos.x_val,self.pos.y_val,self.pos.z_val)
     
-    def get_dist(self):
+    def get_dist(self) -> float:
         return self.pos.get_length()
+    
+    def get_pos(self) -> airsim.Vector3r:
+        return self.pos
+
+    def get_sp(self) -> airsim.Vector3r:
+        return self.sp

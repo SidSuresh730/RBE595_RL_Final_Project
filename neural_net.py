@@ -86,15 +86,10 @@ class DQNetwork(nn.Module):
 # that torch have a built in attr we could use: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
 # I am also using: https://pytorch.org/docs/stable/generated/torch.nn.functional.relu.html for the nn.
 
-def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env):
+def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, client):
     
-    # This initializes the main Q-network and a target Q-network. 
-    # The target Q-network is used for stability in training, and its parameters are 
-    # initially set to be the same as the main Q-network.
-    q_network = DQNetwork(input_size, output_size)
-    # target_q_network = DQNetwork(input_size, output_size)
-    # target_q_network.load_state_dict(q_network.state_dict())
-    # target_q_network.eval()
+    # This initializes the Q-network
+    q_network = DQNetwork()
 
     # Sets up the Adam optimizer for updating the Q-network parameters 
     # and uses the Huber loss as the loss function
@@ -105,20 +100,22 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
     # and a variable to keep track of the total interactions.
     experience_replay = []
     total_interactions = 0
-
+    epsilon = 1
     # Algorithm 1 pseudo code from paper. 
     # Starts the main loop over episodes
-    for episode in range(episodes):
-        state = env.reset() # resets the environment for each new episode.
-
+    for i in range(episodes):
+        if i<episodes//2:
+            epsilon-=0.009
+        ep = Episode(client=client,n=np.random.choice([1,2,3]))
+        state = ep.state.get_inputs()
         # loop iterates over time steps within each episode, 
         # selects actions using the epsilon-greedy policy, 
         # and obtains the next state and reward from the environment.
         for t in range(min_interaction_limit):
-            q_values = q_network(torch.tensor(state, dtype=torch.float32))
+            q_values = q_network(state)
             action = epsilon_greedy(q_values, epsilon=0.1) # from above function
-            next_state, reward, done, _ = env.step(action.item())
-
+            next_state, reward, done = ep.step(a=action)
+            
             # Appends the current state, action, next state, and reward to the experience replay buffer.
             experience_replay.append((state, action, next_state, reward))
 
@@ -127,13 +124,13 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
                 break
 
             # Updates the current state for the next time step.
-            state = next_state
+            ep.state = next_state
 
         # 3 Update interaction count
         total_interactions += min_interaction_limit
 
         # Update the network parameters
-        if total_interactions >= update_frequency:
+        if total_interactions >= update_frequency: 
             for _ in range(update_frequency):
                 # This selects a random minibatch from the experience replay buffer.
                 minibatch = random.sample(experience_replay, k=min(min_interaction_limit, len(experience_replay)))
@@ -149,7 +146,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
 
                 with torch.no_grad():
                     # Calculates the target Q-values using the target Q-network.
-                    target_q_values = target_q_network(next_states)
+                    target_q_values = q_network(next_states)
                     target_max_q_values, _ = torch.max(target_q_values, dim=1, keepdim=True)
                     targets = rewards + gamma * target_max_q_values
 
@@ -166,10 +163,11 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
                 optimizer.step()
 
             # Update target Q-network
-            target_q_network.load_state_dict(q_network.state_dict())
+            # target_q_network.load_state_dict(q_network.state_dict())
 
             experience_replay = []  # Clear experience replay buffer
 
+    torch.save(q_network,'dqn.pt')
     return q_network
 
 

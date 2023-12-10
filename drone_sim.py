@@ -52,7 +52,7 @@ print("state: %s" % pprint.pformat(state))
 
 airsim.wait_key('Press any key to follow the global path')
 #client.moveToPositionAsync(-10, 10, -10, 5).join()
-img1,img2,img3 = custom.execute_motion_primitive(client,16,1.0)
+img1,img2,img3 = custom.execute_motion_primitive(client,0,1.0)
 # p = custom.getPath(client)
 # p = custom.generateMotionPrimitives(client)[17]
 # for i in range(0,50):
