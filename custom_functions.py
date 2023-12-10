@@ -5,6 +5,7 @@ from math import tanh
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import random
 
 # Learning Constants
@@ -19,6 +20,7 @@ N = 1.0
 MIN_INTERACTION_LIMIT = 64
 DELTA = 1.0
 EPISODES = 2000 
+BATCH_SIZE = 64
 update_frequency = 100  # Update every 100 episodes
 GAMMA = 0.99 # default
 learning_rate = 0.001 # default
@@ -40,7 +42,6 @@ POS_NN_H1 = 8
 POS_NN_H2 = 4
 POSX_NN_H2 = 8
 POS_NN_H3 = 8
-
 
 # Motion primitive constants
 NODES_0 = np.array([[0.0,0.0,0.0]])
@@ -76,8 +77,6 @@ START2 = "Start2"
 START3 = "Start3"
 STARTS = [START1,START2,START3]
 GOALS = [GOAL1,GOAL2,GOAL3]
-
-
 
 # input: MultirotorClient to get path for, index of motion primitive
 # output: Path in world frame for client to execute
@@ -288,26 +287,6 @@ class State:
 # that torch have a built in attr we could use: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
 # I am also using: https://pytorch.org/docs/stable/generated/torch.nn.functional.relu.html for the nn.
 
-'''class QNetwork(nn.Module):
-    # This defines a neural network class (QNetwork) using PyTorch's neural network module (nn.Module). 
-    # It has two fully connected layers (fc and fc2) with ReLU activation.
-    def __init__(self, input_size, output_size):
-        super(QNetwork, self).__init__()
-        self.fc = nn.Linear(input_size, 64)
-        self.fc2 = nn.Linear(64, output_size)
-
-    # Forward method of the neural network, defining the forward pass through the layers.
-    def forward(self, x):
-        x = torch.relu(self.fc(x))
-        x = self.fc2(x)
-        return x'''
-
-# data = [[1,2],[3,4]]
-# data = [1,2,3,4]
-# np_arr = np.array(data)
-# x_np = torch.from_numpy(np_arr)
-# t1 = torch.cat([x_np,x_np,x_np])
-# print(t1)
 device = (
     "cuda"
     if torch.cuda.is_available()
@@ -377,13 +356,90 @@ class DQNetwork(nn.Module):
         logits = self.combine_stack(torch.cat([img_out,pos_out]))
         return logits
 
-def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env):
+def DQN():
+    # Initialize AirSim client and environment number
+    client = airsim.MultirotorClient()
+    client.confirmConnection() # # Confirm connection to the AirSim simulator
+    client.enableApiControl(True)
+    client.armDisarm(True)
+    environment_number = 1  # Set the appropriate environment number
+
+    # Initialize your deep Q-network
+    q_network = DQNetwork().to(device)
+    optimizer = torch.optim.Adam(q_network.parameters(), lr=learning_rate)
+
+    # Initialize experience replay memory
+    experience_replay = []
+
+    for episode in range(EPISODES):
+        # Reset environment and initialize state
+        episode_obj = Episode(client, environment_number)
+        state = State(*[execute_motion_primitive(client, i, vel=1.0) for i in range(N_LINEAR_PATHS)], episode_obj.start_pose)
+
+        for t in range(MIN_INTERACTION_LIMIT):
+            # Epsilon-greedy action selection
+            epsilon = max(0.1, 1.0 - episode / 1000)  # Decay epsilon over time
+            action = epsilon_greedy(q_network(state.get_inputs()), epsilon)
+
+            # Execute selected action and observe new state and reward
+            episode_obj.step(action)
+            new_images = [execute_motion_primitive(client, i, vel=1.0) for i in range(N_LINEAR_PATHS)]
+            new_position = client.getMultirotorState().kinematics_estimated.position
+            new_state = State(*new_images, new_position)
+
+            # Calculate reward and check for termination conditions
+            reward = reward_function(state.get_dist(), new_state.get_dist(), episode_obj.hasCollided())
+            if episode_obj.reachedGoal():
+                reward = 1.0
+
+            # Store the experience in replay memory
+            experience_replay.append((state, action, reward, new_state))
+
+            # Update state for the next iteration
+            state = new_state
+
+            # Perform experience replay if applicable
+            if len(experience_replay) >= MIN_INTERACTION_LIMIT and t % update_frequency == 0:
+                # Sample a random minibatch from experience replay
+                minibatch = random.sample(experience_replay, BATCH_SIZE)
+
+                # Compute Q-learning targets (y) for the minibatch
+                targets = []
+                for sample in minibatch:
+                    s, a, r, s_prime = sample
+                    target = r + GAMMA * torch.max(q_network(s_prime.get_inputs()))
+                    targets.append(target)
+
+                targets = torch.stack(targets)
+
+                # Compute Q-values for the minibatch
+                q_values = q_network(torch.stack([s.get_inputs() for s, _, _, _ in minibatch]))
+
+                # Calculate Huber loss
+                loss = F.smooth_l1_loss(q_values.gather(1, torch.tensor([[a] for _, a, _, _ in minibatch], device=device)), targets.unsqueeze(1))
+
+                # Optimize the model
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                # Clear experience replay memory
+                experience_replay = []
+
+            # Break if collision or goal reached
+            if episode_obj.hasCollided() or episode_obj.reachedGoal():
+                break
+
+# Call the DQN function to start training
+DQN()
+
+'''def DQN(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env):
     
     # This initializes the main Q-network and a target Q-network. 
     # The target Q-network is used for stability in training, and its parameters are 
     # initially set to be the same as the main Q-network.
-    q_network = QNetwork(input_size, output_size)
-    target_q_network = QNetwork(input_size, output_size)
+    q_network = DQNetwork(input_size, output_size)
+    target_q_network = DQNetwork(input_size, output_size)
     target_q_network.load_state_dict(q_network.state_dict())
     target_q_network.eval()
 
@@ -471,3 +527,22 @@ gamma = 0.99 # default
 learning_rate = 0.001 # default
 input_size = 4  # Need to modify based on the paper. Right now these are just dummies
 output_size = 2  # Need to modify based on the paper. Right now these are just dummies
+
+
+dqn=DQN(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env)
+print(dqn)
+
+class QNetwork(nn.Module):
+    # This defines a neural network class (QNetwork) using PyTorch's neural network module (nn.Module). 
+    # It has two fully connected layers (fc and fc2) with ReLU activation.
+    def __init__(self, input_size, output_size):
+        super(QNetwork, self).__init__()
+        self.fc = nn.Linear(input_size, 64)
+        self.fc2 = nn.Linear(64, output_size)
+
+    # Forward method of the neural network, defining the forward pass through the layers.
+    def forward(self, x):
+        x = torch.relu(self.fc(x))
+        x = self.fc2(x)
+        return x'''
+
