@@ -18,7 +18,7 @@ import custom_functions as custom
 client = airsim.MultirotorClient()
 client.confirmConnection()
 client.enableApiControl(True)
-gp = custom.Episode(client=client,n=3)
+gp = custom.Episode(client=client,n=2)
 # startPose1 = client.simGetObjectPose("PlayerStart1")
 # s = pprint.pformat(startPose1)
 # print("start pose: %s" % s)
@@ -52,33 +52,44 @@ print("state: %s" % pprint.pformat(state))
 
 airsim.wait_key('Press any key to follow the global path')
 #client.moveToPositionAsync(-10, 10, -10, 5).join()
-# custom.execute_motion_primitive(client,10,1.0)
+img1,img2,img3 = custom.execute_motion_primitive(client,16,1.0)
 # p = custom.getPath(client)
 # p = custom.generateMotionPrimitives(client)[17]
-for i in range(0,50):
-    p = gp.get_moving_setpoint(timestep=i)
-    x,y,z = p.x_val,p.y_val,p.z_val
-    client.moveToPositionAsync(x=x,y=y,z=z,velocity=5.0).join()
-    print(client.simGetCollisionInfo().has_collided)
+# for i in range(0,50):
+#     p = gp.get_moving_setpoint(timestep=i)
+#     x,y,z = p.x_val,p.y_val,p.z_val
+#     client.moveToPositionAsync(x=x,y=y,z=z,velocity=5.0).join()
+#     print(client.simGetCollisionInfo().has_collided)
 
 # state = client.getMultirotorState()
 # print("state: %s" % pprint.pformat(state))
-print("state: %s" % state.kinematics_estimated)
-airsim.wait_key('Press any key to take images')
-# get camera images from the car
+# print("state: %s" % state.kinematics_estimated)
+# airsim.wait_key('Press any key to take images')
+# # get camera images from the car
 # responses = client.simGetImages([
 #     airsim.ImageRequest("0", airsim.ImageType.DepthVis),  #depth visualization image
 #     airsim.ImageRequest("1", airsim.ImageType.DepthPerspective, True), #depth in perspective projection
 #     airsim.ImageRequest("1", airsim.ImageType.Scene), #scene vision image in png format
 #     airsim.ImageRequest("1", airsim.ImageType.Scene, False, False)])  #scene vision image in uncompressed RGBA array
 # print('Retrieved images: %d' % len(responses))
-response = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-# print(response[0].image_data_uint8)
-# img = custom.img_format(airsim.string_to_uint8_array(response))
-print(response[0])
-img = custom.img_format_float(response[0])
-print(img)
-plt.imshow(img,cmap='binary')
+# response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+# response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+# response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+
+# # print(response[0].image_data_uint8)
+# # img = custom.img_format(airsim.string_to_uint8_array(response))
+# # print(response1[0])
+# img1 = custom.img_format_float(response1[0])
+# img2 = custom.img_format_float(response2[0])
+# img3 = custom.img_format_float(response3[0])
+# print(img)
+plt.figure(1)
+plt.imshow(img1,cmap='binary')
+plt.figure(2)
+plt.imshow(img2,cmap='binary')
+plt.figure(3)
+plt.imshow(img3,cmap='binary')
+
 plt.show()
 # tmp_dir = os.path.join(tempfile.gettempdir(), "airsim_drone")
 # print ("Saving images to %s" % tmp_dir)

@@ -34,7 +34,7 @@ NN_OUTPUT = 18
 POS_NN_INPUT = 1
 POS_NN_H1 = 8
 POS_NN_H2 = 4
-POS1_NN_H2 = 8
+POSX_NN_H2 = 8
 POS_NN_H3 = 8
 
 
@@ -133,7 +133,16 @@ def generateMotionPrimitives(client: airsim.MultirotorClient) -> list:
 # output: None
 def execute_motion_primitive(client: airsim.MultirotorClient, i: int, vel: float) -> None:
     p = getPath(client, i)
-    client.moveOnPathAsync(path=p,velocity=vel).join()
+    response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+    move=client.moveOnPathAsync(path=p,velocity=vel)
+    response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+    response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+
+    img1 = img_format_float(response1[0])
+    img2 = img_format_float(response2[0])
+    img3 = img_format_float(response3[0])
+    move.join()
+    return img1,img2,img3
     # client.hoverAsync().join()
 
 # reward function for the RL algorithm based on Camci et al.
@@ -242,8 +251,8 @@ class Episode:
         sp = gp_unit*timestep
         return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
     
-    def run_DQN(self):
-        pass
+    def step(self,a):
+        execute_motion_primitive(client=self.client,i=a,vel=1.0)
     
     # logic to determine if drone has collided with an object that is not the goal
     # returns True if drone has collided with an obstacle
@@ -256,4 +265,16 @@ class Episode:
     def reachedGoal(self) -> bool:
         collision_info = self.client.simGetCollisionInfo()
         return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
+
+class State:
+    def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r) -> None:
+        self.img1 = img1
+        self.img2 = img2
+        self.img3 = img3
+        self.pos = pos
     
+    def get_inputs(self):
+        return (self.img1,self.img2,self.img3,self.pos.x_val,self.pos.y_val,self.pos.z_val)
+    
+    def get_dist(self):
+        return self.pos.get_length()

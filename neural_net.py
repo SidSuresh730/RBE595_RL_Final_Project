@@ -6,31 +6,79 @@ from custom_functions import *
 
 
 
-data = [[1,2],[3,4]]
-np_arr = np.array(data)
-x_np = torch.from_numpy(np_arr)
+# data = [[1,2],[3,4]]
+# data = [1,2,3,4]
+# np_arr = np.array(data)
+# x_np = torch.from_numpy(np_arr)
+# t1 = torch.cat([x_np,x_np,x_np])
+# print(t1)
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
 
-
-class NeuralNet(nn.Module):
+# Neural network to approximate Q function
+class DQNetwork(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.flatten = nn.Flatten()
-        # stack for processing image data
-        self.img_stack = nn.Sequential(
-            nn.Linear(N_ROWS*N_COLS,128),
-            nn.Linear(128,16),
-            nn.Linear(16,8)
-            # nn.Linear(8,16),
-            # nn.Linear(16,32),
-            # nn.Linear(32,18)
+        # stack for processing image data for images 1 and 2
+        self.img_stack_12 = nn.Sequential(
+            nn.Linear(IMG_NN_INPUT,IMG_NN_H1),
+            nn.Linear(IMG_NN_H1,IMG_NN_H2),
+            nn.Linear(IMG_NN_H2,IMG_NN_H3)
         )
-        self.pos_stack = 0
+        # stack for processing image data for image 3
+        self.img_stack_3 = nn.Sequential(
+            nn.Linear(IMG_NN_INPUT,IMG_NN_H1),
+            nn.Linear(IMG_NN_H1,IMG_NN_H2),
+            nn.Linear(IMG_NN_H2,IMG3_NN_H3)
+        )
+        # stack for processing position data for y and z components of position
+        self.pos_stack_yz = nn.Sequential(
+            nn.Linear(POS_NN_INPUT,POS_NN_H1),
+            nn.Linear(POS_NN_H1,POS_NN_H2),
+        )
+        # stack for processing position data for x components of position
+        self.pos_stack_x = nn.Sequential(
+            nn.Linear(POS_NN_INPUT,POS_NN_H1),
+            nn.Linear(POS_NN_H1,POSX_NN_H2),
+        )
+        # stack for processing combined raw image data
+        self.combine_img_stack = nn.Linear(2*IMG_NN_H3+IMG3_NN_H3,IMG_NN_H4)
+        # stack for processing combined setpoint components
+        self.combine_pos_stack = nn.Linear(2*POS_NN_H2+POSX_NN_H2,POS_NN_H3)
+        # stack for processing image and setpoint data combined
+        self.combine_stack = nn.Sequential(
+            nn.Linear(IMG_NN_H4+POS_NN_H3,NN_H5),
+            nn.Linear(NN_H5,NN_OUTPUT)
+        )
+        
 
     # Forward method of the neural network, defining the forward pass through the layers.
     # DO NOT CALL DIRECTLY, automatically called when passing data into model.
-    def forward(self, x):
+    def forward(self, input):
+        img1,img2,img3,x,y,z = input
+        img1 = self.flatten(img1)
+        img2 = self.flatten(img2)
+        img3 = self.flatten(img3)
         x = self.flatten(x)
-        logits = self.linear_stack(x)
+        y = self.flatten(y)
+        z = self.flatten(z)
+        img1_out = self.img_stack_12(img1)
+        img2_out = self.img_stack_12(img2)
+        img3_out = self.img_stack_3(img3)
+        img_in = torch.cat([img1_out,img2_out,img3_out])
+        x_out = self.pos_stack_x(x)
+        y_out = self.pos_stack_yz(y)
+        z_out = self.pos_stack_yz(z)
+        pos_in = torch.cat([x_out,y_out,z_out])
+        img_out = self.combine_img_stack(img_in)
+        pos_out = self.combine_pos_stack(pos_in)
+        logits = self.combine_stack(torch.cat([img_out,pos_out]))
         return logits
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -38,25 +86,15 @@ class NeuralNet(nn.Module):
 # that torch have a built in attr we could use: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
 # I am also using: https://pytorch.org/docs/stable/generated/torch.nn.functional.relu.html for the nn.
 
-class QNetwork(nn.Module):
-    # This defines a neural network class (QNetwork) using PyTorch's neural network module (nn.Module). 
-    # It has two fully connected layers (fc and fc2) with ReLU activation.
-    def __init__(self, input_size, output_size):
-        super(QNetwork, self).__init__()
-        self.fc = nn.Linear(input_size, 64)
-        self.fc2 = nn.Linear(64, output_size)
-
-    
-
 def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env):
     
     # This initializes the main Q-network and a target Q-network. 
     # The target Q-network is used for stability in training, and its parameters are 
     # initially set to be the same as the main Q-network.
-    q_network = QNetwork(input_size, output_size)
-    target_q_network = QNetwork(input_size, output_size)
-    target_q_network.load_state_dict(q_network.state_dict())
-    target_q_network.eval()
+    q_network = DQNetwork(input_size, output_size)
+    # target_q_network = DQNetwork(input_size, output_size)
+    # target_q_network.load_state_dict(q_network.state_dict())
+    # target_q_network.eval()
 
     # Sets up the Adam optimizer for updating the Q-network parameters 
     # and uses the Huber loss as the loss function
@@ -139,7 +177,6 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
 # Call airsim below
 
 # Items that still be done:
-# 1. NN input and output size? are these 32x32? how to define based on our enviroment?
 # 2. episodes? how many?
 # 3. epsilon? is this arbitrary? may have overlooked on the paper if is there.
 # 4. 
