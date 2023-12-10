@@ -12,8 +12,32 @@ DEL_D_U = 1.0
 R_DP = -0.5
 R_CP = -1.0
 N = 1.0
-N_MIN_INTERACTIONS = 64
+MIN_INTERACTION_LIMIT = 64
 DELTA = 1.0
+EPISODES = 2000 
+update_frequency = 100  # Update every 100 episodes
+GAMMA = 0.99 # default
+learning_rate = 0.001 # default
+N_ROWS = 32
+N_COLS = 32
+# image neural network layer sizes
+IMG_NN_INPUT = N_ROWS*N_COLS
+IMG_NN_H1 = 128
+IMG_NN_H2 = 16
+IMG_NN_H3 = 8
+IMG3_NN_H3 = 16
+IMG_NN_H4 = 16
+# combined neural network layer sizes
+NN_H5 = 32
+NN_OUTPUT = 18
+# position neural network layer sizes
+POS_NN_INPUT = 1
+POS_NN_H1 = 8
+POS_NN_H2 = 4
+POS1_NN_H2 = 8
+POS_NN_H3 = 8
+
+
 # Motion primitive constants
 NODES_0 = np.array([[0.0,0.0,0.0]])
 NODES_1 = np.array([[0.0,0.0,-i] for i in np.arange(0.0,N+.01,0.01)])
