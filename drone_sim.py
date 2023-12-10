@@ -18,41 +18,48 @@ import custom_functions as custom
 client = airsim.MultirotorClient()
 client.confirmConnection()
 client.enableApiControl(True)
+gp = custom.Episode(client=client,n=3)
+# startPose1 = client.simGetObjectPose("PlayerStart1")
+# s = pprint.pformat(startPose1)
+# print("start pose: %s" % s)
+# state = client.getMultirotorState()
+# s = pprint.pformat(state)
+# print("state: %s" % s)
 
-state = client.getMultirotorState()
-s = pprint.pformat(state)
-print("state: %s" % s)
+# imu_data = client.getImuData()
+# s = pprint.pformat(imu_data)
+# print("imu_data: %s" % s)
 
-imu_data = client.getImuData()
-s = pprint.pformat(imu_data)
-print("imu_data: %s" % s)
+# barometer_data = client.getBarometerData()
+# s = pprint.pformat(barometer_data)
+# print("barometer_data: %s" % s)
 
-barometer_data = client.getBarometerData()
-s = pprint.pformat(barometer_data)
-print("barometer_data: %s" % s)
+# magnetometer_data = client.getMagnetometerData()
+# s = pprint.pformat(magnetometer_data)
+# print("magnetometer_data: %s" % s)
 
-magnetometer_data = client.getMagnetometerData()
-s = pprint.pformat(magnetometer_data)
-print("magnetometer_data: %s" % s)
+# gps_data = client.getGpsData()
+# s = pprint.pformat(gps_data)
+# print("gps_data: %s" % s)
 
-gps_data = client.getGpsData()
-s = pprint.pformat(gps_data)
-print("gps_data: %s" % s)
-
-airsim.wait_key('Press any key to takeoff')
-print("Taking off...")
-client.armDisarm(True)
-client.takeoffAsync().join()
+# airsim.wait_key('Press any key to takeoff')
+# print("Taking off...")
+# client.armDisarm(True)
+# client.takeoffAsync().join()
 
 state = client.getMultirotorState()
 print("state: %s" % pprint.pformat(state))
 
-airsim.wait_key('Press any key to move vehicle to (-10, 10, -10) at 5 m/s')
+airsim.wait_key('Press any key to follow the global path')
 #client.moveToPositionAsync(-10, 10, -10, 5).join()
-custom.execute_motion_primitive(client,10,1.0)
+# custom.execute_motion_primitive(client,10,1.0)
 # p = custom.getPath(client)
 # p = custom.generateMotionPrimitives(client)[17]
-
+for i in range(0,50):
+    p = gp.get_moving_setpoint(timestep=i)
+    x,y,z = p.x_val,p.y_val,p.z_val
+    client.moveToPositionAsync(x=x,y=y,z=z,velocity=5.0).join()
+    print(client.simGetCollisionInfo().has_collided)
 
 # state = client.getMultirotorState()
 # print("state: %s" % pprint.pformat(state))
