@@ -12,13 +12,21 @@ import pprint
 import cv2
 from Bezier import Bezier
 # functions and variables associated with the RL Problem
-import custom_functions as custom
-
+from custom_functions import *
+import neural_net
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
 client.confirmConnection()
 client.enableApiControl(True)
-gp = custom.Episode(client=client,n=2)
+q_nn = neural_net.episodic_deep_q_learning(
+    episodes=NUM_EPISODES,
+    min_interaction_limit=MIN_INTERACTION_LIMIT,
+    update_frequency=UPDATE_FREQUENCY,
+    gamma=GAMMA,
+    learning_rate=LEARNING_RATE,
+    client=client
+)
+# gp = custom.Episode(client=client,n=2)
 # startPose1 = client.simGetObjectPose("PlayerStart1")
 # s = pprint.pformat(startPose1)
 # print("start pose: %s" % s)
@@ -47,12 +55,12 @@ gp = custom.Episode(client=client,n=2)
 # client.armDisarm(True)
 # client.takeoffAsync().join()
 
-state = client.getMultirotorState()
-print("state: %s" % pprint.pformat(state))
+# state = client.getMultirotorState()
+# print("state: %s" % pprint.pformat(state))
 
-airsim.wait_key('Press any key to follow the global path')
-#client.moveToPositionAsync(-10, 10, -10, 5).join()
-img1,img2,img3 = custom.execute_motion_primitive(client,0,1.0)
+# airsim.wait_key('Press any key to follow the global path')
+# #client.moveToPositionAsync(-10, 10, -10, 5).join()
+# img1,img2,img3 = custom.execute_motion_primitive(client,0,1.0)
 # p = custom.getPath(client)
 # p = custom.generateMotionPrimitives(client)[17]
 # for i in range(0,50):
@@ -83,14 +91,14 @@ img1,img2,img3 = custom.execute_motion_primitive(client,0,1.0)
 # img2 = custom.img_format_float(response2[0])
 # img3 = custom.img_format_float(response3[0])
 # print(img)
-plt.figure(1)
-plt.imshow(img1,cmap='binary')
-plt.figure(2)
-plt.imshow(img2,cmap='binary')
-plt.figure(3)
-plt.imshow(img3,cmap='binary')
+# plt.figure(1)
+# plt.imshow(img1,cmap='binary')
+# plt.figure(2)
+# plt.imshow(img2,cmap='binary')
+# plt.figure(3)
+# plt.imshow(img3,cmap='binary')
 
-plt.show()
+# plt.show()
 # tmp_dir = os.path.join(tempfile.gettempdir(), "airsim_drone")
 # print ("Saving images to %s" % tmp_dir)
 # try:

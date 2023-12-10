@@ -1,4 +1,5 @@
 import airsim
+import time
 from Bezier import Bezier
 import numpy as np
 from math import tanh
@@ -73,7 +74,9 @@ START3 = "Start3"
 STARTS = [START1,START2,START3]
 GOALS = [GOAL1,GOAL2,GOAL3]
 
-
+# File writing constants
+CSV_NAME = "rewards.csv"
+PT_NAME = "dqn.pt"
 
 # input: MultirotorClient to get path for, index of motion primitive
 # output: Path in world frame for client to execute
@@ -308,3 +311,13 @@ class State:
 
     def get_sp(self) -> airsim.Vector3r:
         return self.sp
+    
+
+def write_to_csv(filename: str, data:list) -> None:
+    f = open(filename,"a")
+    f.write(time.ctime(time.time()))
+    f.write(",")
+    for e in data:
+        f.write(e)
+        f.write(",")
+    f.close()

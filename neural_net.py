@@ -89,7 +89,7 @@ class DQNetwork(nn.Module):
 def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, client):
     
     # This initializes the Q-network
-    q_network = DQNetwork()
+    q_network = DQNetwork().to(device=device)
 
     # Sets up the Adam optimizer for updating the Q-network parameters 
     # and uses the Huber loss as the loss function
@@ -104,6 +104,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
     # Algorithm 1 pseudo code from paper. 
     # Starts the main loop over episodes
     for i in range(episodes):
+        rewards = []
         if i<episodes//2:
             epsilon-=0.009
         ep = Episode(client=client,n=np.random.choice([1,2,3]))
@@ -118,7 +119,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
             
             # Appends the current state, action, next state, and reward to the experience replay buffer.
             experience_replay.append((state, action, next_state, reward))
-
+            rewards.append(reward)
             # This breaks the inner loop if the reward is negative or the episode is done
             if reward < 0 or done:
                 break
@@ -166,8 +167,8 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
             # target_q_network.load_state_dict(q_network.state_dict())
 
             experience_replay = []  # Clear experience replay buffer
-
-    torch.save(q_network,'dqn.pt')
+        write_to_csv(filename=CSV_NAME,data=rewards)
+    torch.save(q_network.state_dict(),PT_NAME)
     return q_network
 
 
