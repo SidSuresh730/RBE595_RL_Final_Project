@@ -2,6 +2,10 @@ import airsim
 from Bezier import Bezier
 import numpy as np
 from math import tanh
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import random
 
 # Learning Constants
 D_MAX = 5.0
@@ -12,6 +16,32 @@ DEL_D_U = 1.0
 R_DP = -0.5
 R_CP = -1.0
 N = 1.0
+MIN_INTERACTION_LIMIT = 64
+DELTA = 1.0
+EPISODES = 2000 
+update_frequency = 100  # Update every 100 episodes
+GAMMA = 0.99 # default
+learning_rate = 0.001 # default
+N_ROWS = 32
+N_COLS = 32
+# image neural network layer sizes
+IMG_NN_INPUT = N_ROWS*N_COLS
+IMG_NN_H1 = 128
+IMG_NN_H2 = 16
+IMG_NN_H3 = 8
+IMG3_NN_H3 = 16
+IMG_NN_H4 = 16
+# combined neural network layer sizes
+NN_H5 = 32
+NN_OUTPUT = 18
+# position neural network layer sizes
+POS_NN_INPUT = 1
+POS_NN_H1 = 8
+POS_NN_H2 = 4
+POSX_NN_H2 = 8
+POS_NN_H3 = 8
+
+
 # Motion primitive constants
 NODES_0 = np.array([[0.0,0.0,0.0]])
 NODES_1 = np.array([[0.0,0.0,-i] for i in np.arange(0.0,N+.01,0.01)])
@@ -107,7 +137,16 @@ def generateMotionPrimitives(client: airsim.MultirotorClient) -> list:
 # output: None
 def execute_motion_primitive(client: airsim.MultirotorClient, i: int, vel: float) -> None:
     p = getPath(client, i)
-    client.moveOnPathAsync(path=p,velocity=vel).join()
+    response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+    move=client.moveOnPathAsync(path=p,velocity=vel)
+    response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+    response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+
+    img1 = img_format_float(response1[0])
+    img2 = img_format_float(response2[0])
+    img3 = img_format_float(response3[0])
+    move.join()
+    return img1,img2,img3
     # client.hoverAsync().join()
 
 # reward function for the RL algorithm based on Camci et al.
@@ -184,11 +223,11 @@ def get_moving_setpoint(client:airsim.MultirotorClient,global_path:airsim.Vector
 # returns index of action to take based on epsilon-greedy policy
 # input: q function, state, epsilon
 # output: index of action to be taken
-def epsilon_greedy(q,s,epsilon):
-    s = (s[0],s[1])
+def epsilon_greedy(q_s,epsilon):
+    # s = (s[0],s[1])
     mag_A = len(NODES_LIST)
     # print("mag_A: ", mag_A)
-    a_star = np.argmax(q[s])
+    a_star = np.argmax(q_s)
     weights = np.zeros(mag_A)+epsilon/mag_A
     weights[a_star]=1-epsilon+epsilon/mag_A 
     return np.random.choice(mag_A,p=weights)
@@ -207,6 +246,7 @@ class Episode:
         self.client.takeoffAsync().join()
         self.start_pose = self.client.getMultirotorState().kinematics_estimated.position
         self.global_path = self.goal_pose.position-self.start_pose
+
     # calculates moving setpoint for timestep in world frame
     # input: client, global_path, timestep
     # output: moving setpoint in world frame, maxed at the end goal
@@ -214,77 +254,41 @@ class Episode:
         gp_unit = self.global_path/self.global_path.get_length()
         sp = gp_unit*timestep
         return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
+    
+    def step(self,a):
+        execute_motion_primitive(client=self.client,i=a,vel=1.0)
+    
+    # logic to determine if drone has collided with an object that is not the goal
+    # returns True if drone has collided with an obstacle
+    def hasCollided(self) -> bool:
+        collision_info = self.client.simGetCollisionInfo()
+        return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1]
+    
+    # logic to determine if drone has collided with the goal
+    # returns True if drone has reached the goal 
+    def reachedGoal(self) -> bool:
+        collision_info = self.client.simGetCollisionInfo()
+        return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
 
-'''
-
-lol
-# Not sure if we need this directly. But I coded the Adam algorithm from the paper. The objective
-# function is something that I am still confused about but looks like torch have a built in attr optim.Adam()
-# that we can use as well https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
-
-import torch
-
-# Example constant usage:  Good default settings for the tested machine learning problems are alpha = 0.001,
-beta1 = 0.9, beta2 = 0.999 and epsilon = 10^-8. All operations on vectors are element-wise. With beta
-t1 and betat2 we denote β1 and β2 to the power t.
-
-F = # Stochastic objective function with parameters θ
-ALPHA = 0.001 # step size
-BETA1 = 0.9 # exponential decay rates for moment estimates
-BETA2 = 0.999 # exponential decay rates for moment estimates
-EPSILON = 1e-8 # small constant to prevent division by zero
-THETA0 = np.zeros(10)  # initial parameter vector - What is the actual size and values of the paper?
-
-def adam_optimizer(ALPHA, BETA1, BETA2, EPSILON, F, THETA0, convergence_threshold=1e-6):
-    # Initialize parameters
-    theta_t = torch.tensor(THETA0, requires_grad=True, dtype=torch.float) # : Parameter vector
-    m_t = torch.zeros_like(theta_t) # The first moment vector initialized with zeros
-    v_t = torch.zeros_like(theta_t) # The second moment vector initialized with zeros.
-    t = 0 # Time step initialize at zero
-
-    # The loop will be terminated when the convergence condition is met.
-    while True:
-        t += 1
-
-        # Compute gradients
-        g_t = torch.autograd.grad(F(theta_t), theta_t)[0]
-
-        # Update biased first moment estimate
-        m_t = BETA1 * m_t + (1 - BETA1) * g_t
-
-        # Update biased second raw moment estimate
-        v_t = BETA2 * v_t + (1 - BETA2) * (g_t ** 2)
-
-        # Compute bias-corrected first moment estimate
-        m_hat_t = m_t / (1 - BETA1 ** t)
-
-        # Compute bias-corrected second raw moment estimate
-        v_hat_t = v_t / (1 - BETA2 ** t)
-
-        # Update parameters
-        theta_t = theta_t - ALPHA * m_hat_t / (torch.sqrt(v_hat_t) + EPSILON)
-
-        # Check for convergence
-        if torch.norm(g_t) < convergence_threshold:
-            break
-
-    # Return the final parameter vector as a NumPy array after detaching it from the computational graph
-    return theta_t.detach().numpy()
-
-# Function run:
-# result = adam_optimizer(alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, f=your_stochastic_objective_function, theta0=your_initial_parameters)
+class State:
+    def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r) -> None:
+        self.img1 = img1
+        self.img2 = img2
+        self.img3 = img3
+        self.pos = pos
+    
+    def get_inputs(self):
+        return (self.img1,self.img2,self.img3,self.pos.x_val,self.pos.y_val,self.pos.z_val)
+    
+    def get_dist(self):
+        return self.pos.get_length()
 
 # ----------------------------------------------------------------------------------------------------------------
 # Please note that this is purely using torch. Above, I attempted to do the adam as a function but then realized
 # that torch have a built in attr we could use: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
 # I am also using: https://pytorch.org/docs/stable/generated/torch.nn.functional.relu.html for the nn.
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import random
-
-class QNetwork(nn.Module):
+'''class QNetwork(nn.Module):
     # This defines a neural network class (QNetwork) using PyTorch's neural network module (nn.Module). 
     # It has two fully connected layers (fc and fc2) with ReLU activation.
     def __init__(self, input_size, output_size):
@@ -296,7 +300,82 @@ class QNetwork(nn.Module):
     def forward(self, x):
         x = torch.relu(self.fc(x))
         x = self.fc2(x)
-        return x
+        return x'''
+
+# data = [[1,2],[3,4]]
+# data = [1,2,3,4]
+# np_arr = np.array(data)
+# x_np = torch.from_numpy(np_arr)
+# t1 = torch.cat([x_np,x_np,x_np])
+# print(t1)
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+
+# Neural network to approximate Q function
+class DQNetwork(nn.Module):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.flatten = nn.Flatten()
+        # stack for processing image data for images 1 and 2
+        self.img_stack_12 = nn.Sequential(
+            nn.Linear(IMG_NN_INPUT,IMG_NN_H1),
+            nn.Linear(IMG_NN_H1,IMG_NN_H2),
+            nn.Linear(IMG_NN_H2,IMG_NN_H3)
+        )
+        # stack for processing image data for image 3
+        self.img_stack_3 = nn.Sequential(
+            nn.Linear(IMG_NN_INPUT,IMG_NN_H1),
+            nn.Linear(IMG_NN_H1,IMG_NN_H2),
+            nn.Linear(IMG_NN_H2,IMG3_NN_H3)
+        )
+        # stack for processing position data for y and z components of position
+        self.pos_stack_yz = nn.Sequential(
+            nn.Linear(POS_NN_INPUT,POS_NN_H1),
+            nn.Linear(POS_NN_H1,POS_NN_H2),
+        )
+        # stack for processing position data for x components of position
+        self.pos_stack_x = nn.Sequential(
+            nn.Linear(POS_NN_INPUT,POS_NN_H1),
+            nn.Linear(POS_NN_H1,POSX_NN_H2),
+        )
+        # stack for processing combined raw image data
+        self.combine_img_stack = nn.Linear(2*IMG_NN_H3+IMG3_NN_H3,IMG_NN_H4)
+        # stack for processing combined setpoint components
+        self.combine_pos_stack = nn.Linear(2*POS_NN_H2+POSX_NN_H2,POS_NN_H3)
+        # stack for processing image and setpoint data combined
+        self.combine_stack = nn.Sequential(
+            nn.Linear(IMG_NN_H4+POS_NN_H3,NN_H5),
+            nn.Linear(NN_H5,NN_OUTPUT)
+        )
+        
+
+    # Forward method of the neural network, defining the forward pass through the layers.
+    # DO NOT CALL DIRECTLY, automatically called when passing data into model.
+    def forward(self, input):
+        img1,img2,img3,x,y,z = input
+        img1 = self.flatten(img1)
+        img2 = self.flatten(img2)
+        img3 = self.flatten(img3)
+        x = self.flatten(x)
+        y = self.flatten(y)
+        z = self.flatten(z)
+        img1_out = self.img_stack_12(img1)
+        img2_out = self.img_stack_12(img2)
+        img3_out = self.img_stack_3(img3)
+        img_in = torch.cat([img1_out,img2_out,img3_out])
+        x_out = self.pos_stack_x(x)
+        y_out = self.pos_stack_yz(y)
+        z_out = self.pos_stack_yz(z)
+        pos_in = torch.cat([x_out,y_out,z_out])
+        img_out = self.combine_img_stack(img_in)
+        pos_out = self.combine_pos_stack(pos_in)
+        logits = self.combine_stack(torch.cat([img_out,pos_out]))
+        return logits
 
 def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, input_size, output_size, env):
     
@@ -341,7 +420,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
             # Updates the current state for the next time step.
             state = next_state
 
-        3 Update interaction count
+        # Update interaction count
         total_interactions += min_interaction_limit
 
         # Update the network parameters
@@ -392,13 +471,3 @@ gamma = 0.99 # default
 learning_rate = 0.001 # default
 input_size = 4  # Need to modify based on the paper. Right now these are just dummies
 output_size = 2  # Need to modify based on the paper. Right now these are just dummies
-
-# Call airsim below
-
-# Items that still be done:
-1. NN input and output size? are these 32x32? how to define based on our enviroment?
-2. episodes? how many?
-3. epsilon? is this arbitrary? may have overlooked on the paper if is there.
-4. 
-
-'''
