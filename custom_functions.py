@@ -1,5 +1,6 @@
 import airsim
 import time
+import torch
 from Bezier import Bezier
 import numpy as np
 from math import tanh
@@ -318,6 +319,6 @@ def write_to_csv(filename: str, data:list) -> None:
     f.write(time.ctime(time.time()))
     f.write(",")
     for e in data:
-        f.write(e)
+        f.write(str(e))
         f.write(",")
     f.close()

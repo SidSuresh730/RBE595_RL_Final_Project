@@ -65,20 +65,31 @@ class DQNetwork(nn.Module):
         img1 = self.flatten(torch.tensor(img1,dtype=torch.float32))
         img2 = self.flatten(torch.tensor(img2,dtype=torch.float32))
         img3 = self.flatten(torch.tensor(img3,dtype=torch.float32))
-        x = torch.tensor(x,dtype=torch.float32)#self.flatten(x)
-        y = torch.tensor(y,dtype=torch.float32)#self.flatten(y)
-        z = torch.tensor(z,dtype=torch.float32)#self.flatten(z)
+        x = torch.tensor([x],dtype=torch.float32)#self.flatten(x)
+        y = torch.tensor([y],dtype=torch.float32)#self.flatten(y)
+        z = torch.tensor([z],dtype=torch.float32)#self.flatten(z)
         img1_out = self.img_stack_12(img1)
+        # print("Img1: Good")
         img2_out = self.img_stack_12(img2)
+        # print("Img2: Good")
         img3_out = self.img_stack_3(img3)
+        # print("Img3: Good")
         img_in = torch.cat([img1_out,img2_out,img3_out])
+        # print("Concat: Good")
         x_out = self.pos_stack_x(x)
+        # print("posx: Good")
         y_out = self.pos_stack_yz(y)
+        # print("posy: Good")
         z_out = self.pos_stack_yz(z)
+        # print("posz: Good")
         pos_in = torch.cat([x_out,y_out,z_out])
+        # print("Concat 2: Good")
         img_out = self.combine_img_stack(img_in)
+        # print("Total img: Good")
         pos_out = self.combine_pos_stack(pos_in)
+        # print("Total pos: Good")
         logits = self.combine_stack(torch.cat([img_out,pos_out]))
+        # print("Logits: Good")
         return logits
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -104,6 +115,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
     # Algorithm 1 pseudo code from paper. 
     # Starts the main loop over episodes
     for i in range(episodes):
+        print("Episode: ",i)
         rewards = []
         if i<episodes//2:
             epsilon-=0.009
@@ -114,6 +126,7 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
         # and obtains the next state and reward from the environment.
         for t in range(min_interaction_limit):
             q_values = q_network(state)
+            q_values = q_values.detach().numpy()
             action = epsilon_greedy(q_values, epsilon=0.1) # from above function
             next_state, reward, done = ep.step(a=action)
             
