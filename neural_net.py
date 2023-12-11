@@ -144,22 +144,27 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
             ep.state = next_state
 
         # 3 Update interaction count
-        total_interactions += min_interaction_limit
+        total_interactions += MINIBATCH_SIZE
 
         # Update the network parameters
-        if total_interactions >= update_frequency: 
-            for _ in range(update_frequency):
+        if total_interactions >= min_interaction_limit: #update_frequency: 
+            for _ in range(len(experience_replay)//MINIBATCH_SIZE):
                 # This selects a random minibatch from the experience replay buffer.
-                minibatch = random.sample(experience_replay, k=min(min_interaction_limit, len(experience_replay)))
-
+                minibatch = random.sample(experience_replay, k=MINIBATCH_SIZE)#min(min_interaction_limit, len(experience_replay)))
+                # for m in minibatch:
+                #     experience_replay.remove(m)
                 # This unpacks the minibatch into separate lists for states, actions, next states, and rewards.
                 states, actions, next_states, rewards = zip(*minibatch)
 
                 # Converts the lists into PyTorch tensors.
-                states = torch.tensor(np.array(states), dtype=torch.float32)
-                actions = torch.tensor(np.array(actions), dtype=torch.long).view(-1, 1)
-                next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
-                rewards = torch.tensor(np.array(rewards), dtype=torch.float32).view(-1, 1)
+                try:
+                    states = torch.tensor(np.array(states), dtype=torch.float32)
+                    actions = torch.tensor(np.array(actions), dtype=torch.long).view(-1, 1)
+                    next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
+                    rewards = torch.tensor(np.array(rewards), dtype=torch.float32).view(-1, 1)
+                except:
+                    # print(states)
+                    print(actions)
 
                 with torch.no_grad():
                     # Calculates the target Q-values using the target Q-network.

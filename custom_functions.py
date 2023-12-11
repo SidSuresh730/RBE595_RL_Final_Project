@@ -15,6 +15,7 @@ R_DP = -0.5
 R_CP = -1.0
 N = 1.0
 MIN_INTERACTION_LIMIT = 64
+MINIBATCH_SIZE = 8
 LEARNING_RATE = 1.0
 EPISODES = 2000 
 UPDATE_FREQUENCY = 100  # Update every 100 episodes
@@ -138,14 +139,14 @@ def generateMotionPrimitives(client: airsim.MultirotorClient) -> list:
 def execute_motion_primitive(client: airsim.MultirotorClient, i: int, vel: float) -> None:
     p = getPath(client, i)
     response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-    move=client.moveOnPathAsync(path=p,velocity=vel,timeout_sec=30).join()
+    move=client.moveOnPathAsync(path=p,velocity=vel,timeout_sec=10)
     response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
     response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-    # move.join()
+    move.join()
+    print("joined")
     img1 = img_format_float(response1[0])
     img2 = img_format_float(response2[0])
     img3 = img_format_float(response3[0])
-    print("joined")
     return img1,img2,img3
     # client.hoverAsync().join()
 
@@ -246,7 +247,7 @@ class Episode:
         self.client.confirmConnection()
         self.client.enableApiControl(True)
         self.client.armDisarm(True)
-        self.client.takeoffAsync().join()
+        self.client.takeoffAsync(timeout_sec=5).join()
         self.start_pos = self.client.getMultirotorState().kinematics_estimated.position
         self.global_path = self.goal_pose.position-self.start_pos
         im1,im2,im3 = execute_motion_primitive(self.client,0,vel=1.0)
@@ -297,8 +298,8 @@ class Episode:
 
     def reset(self) -> None:
         self.client.reset()
-        self.client.armDisarm(False)
-        self.client.enableApiControl(False)
+        # self.client.armDisarm(False)
+        # self.client.enableApiControl(False)
 # class to hold state data for use in NN and reward function
 class State:
     def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r,sp:airsim.Vector3r) -> None:
