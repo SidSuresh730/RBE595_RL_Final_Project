@@ -76,7 +76,7 @@ STARTS = [START1,START2,START3]
 GOALS = [GOAL1,GOAL2,GOAL3]
 
 # File writing constants
-CSV_NAME = "rewards.csv"
+# CSV_NAME = "rewards.csv"
 PT_NAME = "dqn.pt"
 
 # input: MultirotorClient to get path for, index of motion primitive
@@ -138,14 +138,14 @@ def generateMotionPrimitives(client: airsim.MultirotorClient) -> list:
 def execute_motion_primitive(client: airsim.MultirotorClient, i: int, vel: float) -> None:
     p = getPath(client, i)
     response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-    move=client.moveOnPathAsync(path=p,velocity=vel)
+    move=client.moveOnPathAsync(path=p,velocity=vel,timeout_sec=30).join()
     response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
     response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-
+    # move.join()
     img1 = img_format_float(response1[0])
     img2 = img_format_float(response2[0])
     img3 = img_format_float(response3[0])
-    move.join()
+    print("joined")
     return img1,img2,img3
     # client.hoverAsync().join()
 
@@ -172,7 +172,7 @@ def reward_function(d_t_min: float,d_t: float,collision: bool) -> float:
 def img_format_uint8(response: airsim.ImageResponse) -> np.array:
     # convert string of bytes to array of uint8
     img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8)
-    print("Image height and width: ", response.height,response.width, len(img1d))
+    # print("Image height and width: ", response.height,response.width, len(img1d))
     # reshape linear array into 2-d pixel array
     img_rgb = img1d.reshape(response.height,response.width,3)
     return img_rgb
@@ -183,7 +183,7 @@ def img_format_uint8(response: airsim.ImageResponse) -> np.array:
 def img_format_float(response: airsim.ImageResponse) -> np.array:
     # convert list to np.array
     img1d = np.array(response.image_data_float)
-    print("Image height and width: ", response.height,response.width, len(img1d))
+    # print("Image height and width: ", response.height,response.width, len(img1d))
     # reshape tp 2-d
     img_rgb = img1d.reshape(response.height,response.width)
     return img_rgb
@@ -227,7 +227,7 @@ def epsilon_greedy(q_s,epsilon):
     # s = (s[0],s[1])
     mag_A = len(NODES_LIST)
     # print("mag_A: ", mag_A)
-    a_star = np.argmax(q_s)
+    a_star = np.random.choice(np.where(q_s==q_s.max())[0])
     weights = np.zeros(mag_A)+epsilon/mag_A
     weights[a_star]=1-epsilon+epsilon/mag_A 
     return np.random.choice(mag_A,p=weights)
@@ -240,9 +240,11 @@ class Episode:
         self.n = n
         self.t = 0
         self.client = client
-        start = client.simGetObjectPose(STARTS[n-1])
+        self.start = client.simGetObjectPose(STARTS[n-1])
         self.goal_pose = client.simGetObjectPose(GOALS[n-1])
-        self.client.simSetVehiclePose(start,ignore_collision=True)
+        self.client.simSetVehiclePose(self.start,ignore_collision=True)
+        self.client.confirmConnection()
+        self.client.enableApiControl(True)
         self.client.armDisarm(True)
         self.client.takeoffAsync().join()
         self.start_pos = self.client.getMultirotorState().kinematics_estimated.position
@@ -282,7 +284,10 @@ class Episode:
     # returns True if drone has collided with an obstacle
     def hasCollided(self) -> bool:
         collision_info = self.client.simGetCollisionInfo()
-        return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1]
+        # print(collision_info)
+        return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1] and self.t != 0
+            # return collision_info.impact_point != self.start.position
+                
     
     # logic to determine if drone has collided with the goal
     # returns True if drone has reached the goal 
@@ -290,6 +295,10 @@ class Episode:
         collision_info = self.client.simGetCollisionInfo()
         return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
 
+    def reset(self) -> None:
+        self.client.reset()
+        self.client.armDisarm(False)
+        self.client.enableApiControl(False)
 # class to hold state data for use in NN and reward function
 class State:
     def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r,sp:airsim.Vector3r) -> None:
@@ -314,11 +323,12 @@ class State:
         return self.sp
     
 
-def write_to_csv(filename: str, data:list) -> None:
+def write_to_csv(filename: str, episode: int,data:list) -> None:
     f = open(filename,"a")
-    f.write(time.ctime(time.time()))
+    f.write("Episode: %d"%episode)
     f.write(",")
     for e in data:
         f.write(str(e))
         f.write(",")
+    f.write("\n")
     f.close()

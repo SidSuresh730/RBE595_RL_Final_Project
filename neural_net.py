@@ -3,7 +3,7 @@ from torch import nn, optim
 import numpy as np
 import random
 from custom_functions import *
-
+import datetime
 
 
 # data = [[1,2],[3,4]]
@@ -98,7 +98,7 @@ class DQNetwork(nn.Module):
 # I am also using: https://pytorch.org/docs/stable/generated/torch.nn.functional.relu.html for the nn.
 
 def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, gamma, learning_rate, client):
-    
+    file_name = "rewards_"+str(time.time())+".csv"
     # This initializes the Q-network
     q_network = DQNetwork().to(device=device)
 
@@ -131,12 +131,15 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
             next_state, reward, done = ep.step(a=action)
             
             # Appends the current state, action, next state, and reward to the experience replay buffer.
-            experience_replay.append((state, action, next_state, reward))
+            experience_replay.append((state, action, next_state.get_inputs(), reward))
             rewards.append(reward)
+            # print(state)
             # This breaks the inner loop if the reward is negative or the episode is done
-            if reward < 0 or done:
+            if reward < 0:
                 break
-
+            if done:
+                print("goal reached!")
+                break
             # Updates the current state for the next time step.
             ep.state = next_state
 
@@ -153,10 +156,10 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
                 states, actions, next_states, rewards = zip(*minibatch)
 
                 # Converts the lists into PyTorch tensors.
-                states = torch.tensor(states, dtype=torch.float32)
-                actions = torch.tensor(actions, dtype=torch.long).view(-1, 1)
-                next_states = torch.tensor(next_states, dtype=torch.float32)
-                rewards = torch.tensor(rewards, dtype=torch.float32).view(-1, 1)
+                states = torch.tensor(np.array(states), dtype=torch.float32)
+                actions = torch.tensor(np.array(actions), dtype=torch.long).view(-1, 1)
+                next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
+                rewards = torch.tensor(np.array(rewards), dtype=torch.float32).view(-1, 1)
 
                 with torch.no_grad():
                     # Calculates the target Q-values using the target Q-network.
@@ -170,17 +173,18 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, update_frequency, 
                 
                 # Hubber loss - between the predicted Q-values and the target Q-values.
                 loss = criterion(selected_q_values, targets)
-
+                print("Backpropogation...")
                 # Backpropagation and optimization steps to update the Q-network parameters.
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-
+            total_interactions=0
             # Update target Q-network
             # target_q_network.load_state_dict(q_network.state_dict())
 
             experience_replay = []  # Clear experience replay buffer
-        write_to_csv(filename=CSV_NAME,data=rewards)
+        write_to_csv(filename=file_name,episode=i,data=rewards)
+        ep.reset()
     torch.save(q_network.state_dict(),PT_NAME)
     return q_network
 

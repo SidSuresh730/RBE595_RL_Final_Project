@@ -16,8 +16,8 @@ from custom_functions import *
 import neural_net
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
-client.confirmConnection()
-client.enableApiControl(True)
+# client.confirmConnection()
+# client.enableApiControl(True)
 q_nn = neural_net.episodic_deep_q_learning(
     episodes=NUM_EPISODES,
     min_interaction_limit=MIN_INTERACTION_LIMIT,
