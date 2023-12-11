@@ -24,7 +24,7 @@ device = (
 class DQNetwork(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.flatten = nn.Flatten()
+        self.flatten = nn.Flatten(start_dim=0)
         # stack for processing image data for images 1 and 2
         self.img_stack_12 = nn.Sequential(
             nn.Linear(IMG_NN_INPUT,IMG_NN_H1),
@@ -62,12 +62,12 @@ class DQNetwork(nn.Module):
     # DO NOT CALL DIRECTLY, automatically called when passing data into model.
     def forward(self, input):
         img1,img2,img3,x,y,z = input
-        img1 = self.flatten(img1)
-        img2 = self.flatten(img2)
-        img3 = self.flatten(img3)
-        x = self.flatten(x)
-        y = self.flatten(y)
-        z = self.flatten(z)
+        img1 = self.flatten(torch.tensor(img1,dtype=torch.float32))
+        img2 = self.flatten(torch.tensor(img2,dtype=torch.float32))
+        img3 = self.flatten(torch.tensor(img3,dtype=torch.float32))
+        x = torch.tensor(x,dtype=torch.float32)#self.flatten(x)
+        y = torch.tensor(y,dtype=torch.float32)#self.flatten(y)
+        z = torch.tensor(z,dtype=torch.float32)#self.flatten(z)
         img1_out = self.img_stack_12(img1)
         img2_out = self.img_stack_12(img2)
         img3_out = self.img_stack_3(img3)

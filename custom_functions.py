@@ -195,7 +195,7 @@ def calculate_relative_pos(client: airsim.MultirotorClient, set_pt: airsim.Vecto
     pos = state.kinematics_estimated.position
     orientation = state.kinematics_estimated.orientation
     diff_vec_world = set_pt-pos
-    diff_vec_body = orientation.star()*diff_vec_world*orientation
+    diff_vec_body = orientation.star()*diff_vec_world.to_Quaternionr()*orientation
     
     return diff_vec_body
 
@@ -257,7 +257,7 @@ class Episode:
     def get_moving_setpoint(self,timestep) -> airsim.Vector3r:
         gp_unit = self.global_path/self.global_path.get_length()
         sp = gp_unit*(timestep+1)
-        return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pose
+        return min(np.array([self.global_path,sp]),key=lambda p: p.get_length())+self.start_pos
     
     # steps through episode
     # input: action to take 
