@@ -1,0 +1,18 @@
+{
+  "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/main/docs/settings.md",
+  "SettingsVersion": 1.2,
+  "EnableTrace": "True",
+  "ViewMode": "",
+  "CameraDefaults": {
+    "CaptureSettings": [
+      {
+        "ImageType": 4,
+        "Width": 32,
+        "Height": 32,
+        "FOV_Degrees": 90,
+        "AutoExposureSpeed": 100,
+        "MotionBlurAmount": 0
+      }
+    ]
+  }
+}

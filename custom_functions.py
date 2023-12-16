@@ -3,8 +3,9 @@ import time
 import torch
 from Bezier import Bezier
 import numpy as np
+import matplotlib.pyplot as plt
 from math import tanh
-
+from concurrent.futures import Future
 # Learning Constants
 D_MAX = 5.0
 R_L = 0.0
@@ -18,7 +19,7 @@ MIN_INTERACTION_LIMIT = 64
 MINIBATCH_SIZE = 8
 LEARNING_RATE = 1.0
 EPISODES = 2000 
-UPDATE_FREQUENCY = 100  # Update every 100 episodes
+# UPDATE_FREQUENCY = 100  # Update every 100 episodes
 GAMMA = 0.5
 N_ROWS = 32
 N_COLS = 32
@@ -75,10 +76,22 @@ START2 = "Start2"
 START3 = "Start3"
 STARTS = [START1,START2,START3]
 GOALS = [GOAL1,GOAL2,GOAL3]
-
+# OBSTACLE_2_NAME = "Obstacle_2a"
+# OBSTACLE_3_NAME = "Obstacle_3a"
+# OBSTACLE_4_NAME = "Obstacle_3b"
+ASSET = '1M_Cube_Chamfer'
+# OBSTACLE_2_POSITION = airsim.Vector3r(x_val=5.6,y_val=-0.2,z_val=8.92)
+# OBSTACLE_3_POSITION = airsim.Vector3r(x_val=3.8,y_val=-2.6,z_val=8.92)
+# OBSTACLE_4_POSITION = airsim.Vector3r(x_val=7.9,y_val=2.4,z_val=8.92)
+# OBSTACLE_ORIENTATION = airsim.Quaternionr(w_val=1.0,x_val=-0.0,y_val=0.0,z_val=0.0)
+# OBSTACLE_SCALE = airsim.Vector3r(x_val=0.75,y_val=6.25,z_val=9.0)
+# OBSTACLE_2_POSE = airsim.Pose(position_val=OBSTACLE_2_POSITION,orientation_val=OBSTACLE_ORIENTATION)
+# OBSTACLE_3_POSE = airsim.Pose(position_val=OBSTACLE_3_POSITION,orientation_val=OBSTACLE_ORIENTATION)
+# OBSTACLE_4_POSE = airsim.Pose(position_val=OBSTACLE_4_POSITION,orientation_val=OBSTACLE_ORIENTATION)
 # File writing constants
 # CSV_NAME = "rewards.csv"
 PT_NAME = "dqn.pt"
+PT_PATH = "./dqn.pt"
 
 # input: MultirotorClient to get path for, index of motion primitive
 # output: Path in world frame for client to execute
@@ -133,17 +146,60 @@ def generateMotionPrimitives(client: airsim.MultirotorClient) -> list:
         
     return primitives_list
 
+# Creates obstacles for episode type n = (1,2,3)
+def setup_obstacles(client: airsim.MultirotorClient,n:int) -> None:
+    if n==1:
+        return
+    if n==2:
+        worked = client.simSpawnObject(OBSTACLE_2_NAME,asset_name=ASSET,pose=OBSTACLE_2_POSE,scale=OBSTACLE_SCALE)
+        while not worked:
+            print("Spawning Obstacle_2")
+            worked = client.simSpawnObject(OBSTACLE_2_NAME,asset_name=ASSET,pose=OBSTACLE_2_POSE,scale=OBSTACLE_SCALE)
+        return
+    if n==3:
+        worked1 = client.simSpawnObject(OBSTACLE_3_NAME,asset_name=ASSET,pose=OBSTACLE_3_POSE,scale=OBSTACLE_SCALE)
+        worked2 = client.simSpawnObject(OBSTACLE_4_NAME,asset_name=ASSET,pose=OBSTACLE_4_POSE,scale=OBSTACLE_SCALE)
+        while not worked1:
+            print("Spawning Obstacle_3")
+            worked1 = client.simSpawnObject(OBSTACLE_3_NAME,asset_name=ASSET,pose=OBSTACLE_3_POSE,scale=OBSTACLE_SCALE)
+        while not worked2:
+            print("Spawning Obstacle_4")
+            worked2 = client.simSpawnObject(OBSTACLE_4_NAME,asset_name=ASSET,pose=OBSTACLE_4_POSE,scale=OBSTACLE_SCALE)
+        return
+# Destroys obstacles for episode type n = (1,2,3)
+def cleanup_obstacles(client: airsim.MultirotorClient,n:int) -> None:
+    if n==1:
+        return
+    if n==2:
+        worked = client.simDestroyObject(OBSTACLE_2_NAME)
+        while not worked:
+            print("Destroying Obstacle_2")
+            worked = client.simDestroyObject(OBSTACLE_2_NAME)
+        return
+    if n==3:
+        worked1 = client.simDestroyObject(OBSTACLE_3_NAME)
+        worked2 = client.simDestroyObject(OBSTACLE_4_NAME)
+        while not worked1:
+            print("Destroying Obstacle_3")
+            worked1 = client.simDestroyObject(OBSTACLE_3_NAME)
+        while not worked2:
+            print("Destroying Obstacle_4")
+            worked2 = client.simDestroyObject(OBSTACLE_4_NAME)
+        return
+
 # execute the motion primitive from the list based on index i with velocity vel
 # input: MultirotorClient to move, index of motion primitive, desired velocity
 # output: None
 def execute_motion_primitive(client: airsim.MultirotorClient, i: int, vel: float) -> None:
     p = getPath(client, i)
     response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
-    move=client.moveOnPathAsync(path=p,velocity=vel,timeout_sec=10)
+    move=client.moveOnPathAsync(path=p,velocity=vel)
     response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
     response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+    
     move.join()
-    print("joined")
+    print("Motion primitive: %d. Joined."%i)
+    # print(client.getMultirotorState())
     img1 = img_format_float(response1[0])
     img2 = img_format_float(response2[0])
     img3 = img_format_float(response3[0])
@@ -238,23 +294,42 @@ class Episode:
     # input: client, environment number (1,2,3)
     # output: None
     def __init__(self,client: airsim.MultirotorClient, n:int) -> None:
+        print("Episode type: %d" %n)
         self.n = n
         self.t = 0
         self.client = client
         self.start = client.simGetObjectPose(STARTS[n-1])
+        # setup_obstacles(client=self.client,n=self.n)
         self.goal_pose = client.simGetObjectPose(GOALS[n-1])
-        self.client.simSetVehiclePose(self.start,ignore_collision=True)
         self.client.confirmConnection()
         self.client.enableApiControl(True)
         self.client.armDisarm(True)
-        self.client.takeoffAsync(timeout_sec=5).join()
+        self.client.simSetVehiclePose(self.start,ignore_collision=True)
+        # time.sleep(5)
+        # while(self.client.getMultirotorState().landed_state==1):
+        self.client.takeoffAsync().join()
         self.start_pos = self.client.getMultirotorState().kinematics_estimated.position
         self.global_path = self.goal_pose.position-self.start_pos
-        im1,im2,im3 = execute_motion_primitive(self.client,0,vel=1.0)
+        # im1,im2,im3 = execute_motion_primitive(self.client,0,vel=1.0)
+        response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        # print(client.getMultirotorState())
+        im1 = img_format_float(response1[0])
+        im2 = img_format_float(response2[0])
+        im3 = img_format_float(response3[0])
         sp = self.get_moving_setpoint(self.t)
         rel_pos = calculate_relative_pos(self.client,sp)
         self.state = State(im1,im2,im3,rel_pos,sp)
 
+    # For test purposes
+    # Checking to see that drone flies the global path properly
+    def flyGlobal(self):
+        for i in range(20):
+            print(i)
+            sp = self.get_moving_setpoint(i)
+            self.client.moveToPositionAsync(sp.x_val,sp.y_val,sp.z_val,velocity=1).join()
+    
     # calculates moving setpoint for timestep in world frame
     # input: client, global_path, timestep
     # output: moving setpoint in world frame, maxed at the end goal
@@ -267,14 +342,18 @@ class Episode:
     # input: action to take 
     # output: next state, reward
     def step(self,a:int) -> tuple:
+        # self.client.simPause(True)
         d_t_min = self.state.get_dist()
         sp = self.state.get_sp()
-        img1,img2,img3 = execute_motion_primitive(client=self.client,i=a,vel=1.0)
+        img1,img2,img3,collided,done = self.execute_motion_primitive(client=self.client,i=a,vel=1.0)
         d_t = calculate_relative_pos(self.client,sp).get_length()
-        collided = self.hasCollided()
-        done = self.reachedGoal()
-        r = reward_function(d_t_min=d_t_min,d_t=d_t,collision=collided)
+        # self.t+=1
+        # collided = self.hasCollided()
+        # done = self.reachedGoal()
+        r = reward_function(d_t_min=d_t_min,d_t=d_t,collision=(collided or self.hasCollided()))
         self.t+=1
+        # if not self.t%3:
+        #     self.state.display_imgs()
         new_sp = self.get_moving_setpoint(self.t)
         rel_pos = calculate_relative_pos(self.client,new_sp)
         new_state = State(img1=img1,img2=img2,img3=img3,pos=rel_pos,sp=new_sp)
@@ -289,17 +368,53 @@ class Episode:
         return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1] and self.t != 0
             # return collision_info.impact_point != self.start.position
                 
-    
     # logic to determine if drone has collided with the goal
     # returns True if drone has reached the goal 
     def reachedGoal(self) -> bool:
         collision_info = self.client.simGetCollisionInfo()
         return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
-
+    
+    # execute the motion primitive from the list based on index i with velocity vel
+    # input: MultirotorClient to move, index of motion primitive, desired velocity
+    # output: None
+    def execute_motion_primitive(self,client: airsim.MultirotorClient, i: int, vel: float) -> None:
+        p = getPath(client, i)
+        move=client.moveOnPathAsync(path=p,velocity=vel,timeout_sec=5)
+        response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        collided = self.hasCollided()
+        done = self.reachedGoal()
+        if collided or done:
+            print("Collided or Done!")
+            client.cancelLastTask()
+        else:
+            move.join()
+        # while(move.join()):
+        # collided = self.hasCollided()
+        # done = self.reachedGoal()
+        
+        print("Motion primitive: %d. Joined."%i)
+        # print(client.getMultirotorState())
+        img1 = img_format_float(response1[0])
+        img2 = img_format_float(response2[0])
+        img3 = img_format_float(response3[0])
+        return img1,img2,img3,collided,done
+    
     def reset(self) -> None:
-        self.client.reset()
+        # self.client.landAsync().join()
+        self.client.hoverAsync().join()
+        while(self.client.simGetCollisionInfo().has_collided):
+            print("Resetting...")
+            self.client.reset()
         # self.client.armDisarm(False)
+        # self.client.simPause(True)
+        # self.client.simPause(False)
         # self.client.enableApiControl(False)
+        # cleanup_obstacles(client=self.client,n=self.n)
+        
+        
+        
 # class to hold state data for use in NN and reward function
 class State:
     def __init__(self,img1:np.array,img2:np.array,img3:np.array,pos:airsim.Vector3r,sp:airsim.Vector3r) -> None:
@@ -322,6 +437,15 @@ class State:
 
     def get_sp(self) -> airsim.Vector3r:
         return self.sp
+    
+    def display_imgs(self):
+        plt.figure(1)
+        plt.imshow(self.img1,cmap='binary')
+        plt.figure(2)
+        plt.imshow(self.img2,cmap='binary')
+        plt.figure(3)
+        plt.imshow(self.img3,cmap='binary')
+        plt.show()
     
 
 def write_to_csv(filename: str, episode: int,data:list) -> None:

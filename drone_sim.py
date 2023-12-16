@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import os
 import tempfile
 import pprint
-import cv2
+# import cv2
 from Bezier import Bezier
 # functions and variables associated with the RL Problem
 from custom_functions import *
@@ -21,12 +21,15 @@ client = airsim.MultirotorClient()
 q_nn = neural_net.episodic_deep_q_learning(
     episodes=NUM_EPISODES,
     min_interaction_limit=MIN_INTERACTION_LIMIT,
-    update_frequency=UPDATE_FREQUENCY,
+    episode_start=497,
+    # update_frequency=UPDATE_FREQUENCY,
     gamma=GAMMA,
     learning_rate=LEARNING_RATE,
     client=client
 )
-# gp = custom.Episode(client=client,n=2)
+
+# ep = Episode(client=client,n=1)
+# ep.flyGlobal()
 # startPose1 = client.simGetObjectPose("PlayerStart1")
 # s = pprint.pformat(startPose1)
 # print("start pose: %s" % s)
