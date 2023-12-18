@@ -7,10 +7,10 @@ import matplotlib.pyplot as plt
 from math import tanh
 from concurrent.futures import Future
 # Learning Constants
-D_MAX = 5.0
+D_MAX = 5.0 # Changed from 5 (paper)
 R_L = 0.0
 R_U = 1.0
-DEL_D_L = 0.0
+DEL_D_L = 0 # Changed from 0 (paper)
 DEL_D_U = 1.0
 R_DP = -0.5
 R_CP = -1.0
@@ -25,7 +25,7 @@ N_ROWS = 32
 N_COLS = 32
 NUM_EPISODES = 2000
 # image neural network layer sizes
-IMG_NN_INPUT = N_ROWS*N_COLS
+IMG_NN_INPUT = N_ROWS*N_COLS 
 IMG_NN_H1 = 128
 IMG_NN_H2 = 16
 IMG_NN_H3 = 8
@@ -40,8 +40,8 @@ POS_NN_H1 = 8
 POS_NN_H2 = 4
 POSX_NN_H2 = 8
 POS_NN_H3 = 8
-
-
+COLLISION_BUFFER_SIZE = 20
+ZERO_VECTOR = airsim.Vector3r()
 # Motion primitive constants
 NODES_0 = np.array([[0.0,0.0,0.0]])
 NODES_1 = np.array([[0.0,0.0,-i] for i in np.arange(0.0,N+.01,0.01)])
@@ -305,6 +305,7 @@ class Episode:
         self.client.enableApiControl(True)
         self.client.armDisarm(True)
         self.client.simSetVehiclePose(self.start,ignore_collision=True)
+        # self.collision_buffer = np.zeros()
         # time.sleep(5)
         # while(self.client.getMultirotorState().landed_state==1):
         self.client.takeoffAsync().join()
@@ -321,15 +322,23 @@ class Episode:
         sp = self.get_moving_setpoint(self.t)
         rel_pos = calculate_relative_pos(self.client,sp)
         self.state = State(im1,im2,im3,rel_pos,sp)
+        self.last_collision_time = self.client.simGetCollisionInfo().time_stamp
 
     # For test purposes
     # Checking to see that drone flies the global path properly
     def flyGlobal(self):
-        for i in range(20):
-            print(i)
-            sp = self.get_moving_setpoint(i)
-            self.client.moveToPositionAsync(sp.x_val,sp.y_val,sp.z_val,velocity=1).join()
-    
+        # for i in range(30):
+        #     print(i)
+        #     sp = self.get_moving_setpoint(i)
+            # self.client.moveToPositionAsync(sp.x_val,sp.y_val,sp.z_val,velocity=1).join()
+        self.t+=1
+        self.client.moveToPositionAsync(self.goal_pose.position.x_val,self.goal_pose.position.y_val,self.goal_pose.position.z_val,velocity=2,timeout_sec=20).join()
+        if self.hasCollided():
+            print("Collision!")
+            return
+        if self.reachedGoal():
+            print("Reached goal!")
+            return
     # calculates moving setpoint for timestep in world frame
     # input: client, global_path, timestep
     # output: moving setpoint in world frame, maxed at the end goal
@@ -349,7 +358,7 @@ class Episode:
         d_t = calculate_relative_pos(self.client,sp).get_length()
         # self.t+=1
         # collided = self.hasCollided()
-        # done = self.reachedGoal()
+        done = done or self.reachedGoal()
         r = reward_function(d_t_min=d_t_min,d_t=d_t,collision=(collided or self.hasCollided()))
         self.t+=1
         # if not self.t%3:
@@ -364,15 +373,21 @@ class Episode:
     # returns True if drone has collided with an obstacle
     def hasCollided(self) -> bool:
         collision_info = self.client.simGetCollisionInfo()
+        # collision_info = self.client.getMultirotorState().collision
         # print(collision_info)
-        return collision_info.has_collided and collision_info.object_name != GOALS[self.n-1] and self.t != 0
+        has_collided = collision_info.time_stamp>self.last_collision_time
+        if self.t == 0:
+            self.last_collision_time = collision_info.time_stamp
+        # has_collided = collision_info.impact_point.x_val != 0.0 or collision_info.impact_point.y_val != 0 or collision_info.impact_point.z_val!=0
+        return (has_collided and collision_info.object_name != GOALS[self.n-1] ) and self.t != 0
             # return collision_info.impact_point != self.start.position
                 
     # logic to determine if drone has collided with the goal
     # returns True if drone has reached the goal 
     def reachedGoal(self) -> bool:
         collision_info = self.client.simGetCollisionInfo()
-        return collision_info.has_collided and collision_info.object_name == GOALS[self.n-1]
+        has_collided = collision_info.time_stamp>self.last_collision_time
+        return has_collided and collision_info.object_name == GOALS[self.n-1]
     
     # execute the motion primitive from the list based on index i with velocity vel
     # input: MultirotorClient to move, index of motion primitive, desired velocity
@@ -383,17 +398,19 @@ class Episode:
         response1 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
         response2 = client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
         response3= client.simGetImages([airsim.ImageRequest("0", image_type=airsim.ImageType.DisparityNormalized,compress=False, pixels_as_float=True)])
+        collided = False
+        done = False
+        # for _ in range(COLLISION_BUFFER_SIZE):
+        #     collided = collided or self.hasCollided()
+        #     done = done or self.reachedGoal()
+        #     if collided or done:
+        #         print("Collided or Done!")
+        #         client.cancelLastTask()
+        #         break
+        move.join()
+        # while(move.join()):
         collided = self.hasCollided()
         done = self.reachedGoal()
-        if collided or done:
-            print("Collided or Done!")
-            client.cancelLastTask()
-        else:
-            move.join()
-        # while(move.join()):
-        # collided = self.hasCollided()
-        # done = self.reachedGoal()
-        
         print("Motion primitive: %d. Joined."%i)
         # print(client.getMultirotorState())
         img1 = img_format_float(response1[0])
@@ -404,7 +421,7 @@ class Episode:
     def reset(self) -> None:
         # self.client.landAsync().join()
         self.client.hoverAsync().join()
-        while(self.client.simGetCollisionInfo().has_collided):
+        while(self.hasCollided()):
             print("Resetting...")
             self.client.reset()
         # self.client.armDisarm(False)
@@ -446,6 +463,9 @@ class State:
         plt.figure(3)
         plt.imshow(self.img3,cmap='binary')
         plt.show()
+    
+    def diff(self,other: 'State'):
+        self.pos.distance_to(other.pos)
     
 
 def write_to_csv(filename: str, episode: int,data:list) -> None:

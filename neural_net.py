@@ -127,112 +127,111 @@ def episodic_deep_q_learning(episodes, min_interaction_limit, episode_start=0, g
         else:
             epsilon = 0.1
         ep = Episode(client=client,n=np.random.choice([1,2,3]))
-        state = ep.state.get_inputs()
+        # state = ep.state.get_inputs()
         # loop iterates over time steps within each episode, 
         # selects actions using the epsilon-greedy policy, 
         # and obtains the next state and reward from the environment.
         for t in range(min_interaction_limit):
-            with torch.no_grad():
-                try:
+            state = ep.state.get_inputs()
+            try:
+                with torch.no_grad():
                     q_values = q_network(state)
-                except:
-                    print(state[0])
-                    print(state[1])
-                    print(state[2])
-                    # plt.figure(1)
-                    # plt.imshow(state[0])
-                    # plt.figure(2)
-                    # plt.imshow(state[1])
-                    # plt.figure(3)
-                    # plt.imshow(state[2])
-                    # plt.show()
-            q_values = q_values.detach().numpy()
-            action = epsilon_greedy(q_values, epsilon) # from above function
-            next_state, reward, done = ep.step(a=action)
+                q_values = q_values.detach().numpy()
+                action = epsilon_greedy(q_values, epsilon) # from above function
+                next_state, reward, done = ep.step(a=action)
+                
+                # Appends the current state, action, next state, and reward to the experience replay buffer.
+                experience_replay.append((state, action, next_state.get_inputs(), reward))
+                rewards.append(reward)
+                # print(state)
+                # This breaks the inner loop if the reward is negative or the episode is done
+                if reward < 0:
+                    break
+                if done:
+                    print("goal reached!")
+                    break
+                # Updates the current state for the next time step.
+                ep.state = next_state
+            except:
+                t-=1
+                print("Try again")
+                continue
             
-            # Appends the current state, action, next state, and reward to the experience replay buffer.
-            experience_replay.append((state, action, next_state.get_inputs(), reward))
-            rewards.append(reward)
-            # print(state)
-            # This breaks the inner loop if the reward is negative or the episode is done
-            if reward < 0:
-                break
-            if done:
-                print("goal reached!")
-                break
-            # Updates the current state for the next time step.
-            ep.state = next_state
         write_to_csv(filename=file_name,episode=i,data=rewards)
         # 3 Update interaction count
         total_interactions += t
-        # print("Num incoming lessons: %d"%(len(experience_replay)//MINIBATCH_SIZE))
         # Update the network parameters
         if total_interactions >= min_interaction_limit: #update_frequency: 
-            for _ in range(len(experience_replay)//MINIBATCH_SIZE):
+            experience_replay = np.array(experience_replay,dtype=object)
+            rand_perms = torch.randperm(len(experience_replay))
+            for i in range(0,len(experience_replay),MINIBATCH_SIZE):
                 # This selects a random minibatch from the experience replay buffer.
-                minibatch = random.sample(experience_replay, k=MINIBATCH_SIZE)#min(min_interaction_limit, len(experience_replay)))
-                # for m in minibatch:
-                #     experience_replay.remove(m)
-                # This unpacks the minibatch into separate lists for states, actions, next states, and rewards.
-                states, actions, next_states, rewards = zip(*minibatch)
+                try:
+                    indices = rand_perms[i:i+MINIBATCH_SIZE]
+                    minibatch = experience_replay[indices]
+                   
+                    # This unpacks the minibatch into separate lists for states, actions, next states, and rewards.
+                    states, actions, next_states, rewards = zip(*minibatch)
 
-                # Converts the lists into PyTorch tensors.
-                # for datum in minibatch:
-                #     states,actions,next_states,rewards = datum
-                # print(states)
-                # states = torch.tenso(np.array(states), dtype=torch.float32)
-                actions = torch.tensor(np.array(actions), dtype=torch.long).view(-1, 1)
-                # next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
-                rewards = torch.tensor(np.array(rewards), dtype=torch.float32).view(-1, 1)
-                # except:
-                #     # print(states)
-                #     print("Actions: ",actions)
-                #     print("Rewards: ",rewards)
-
-                with torch.no_grad():
-                    # Calculates the target Q-values using the target Q-network.
-                    # print(next_states)
-                    try:
-                        target_q_values = torch.stack([q_network(next_state) for next_state in next_states])
-                    except:
-                        for state in states:
-                            print(state[1])
-                            print(state[2])
-                            print(state[3])
-                            # plt.figure(1)
-                            # plt.imshow(state[0],cmap='binary')
-                            # plt.figure(2)
-                            # plt.imshow(state[1],cmap='binary')
-                            # plt.figure(3)
-                            # plt.imshow(state[2],cmap='binary')
-                            # plt.show()
+                    # Converts the lists into PyTorch tensors.
+                    # states = torch.tenso(np.array(states), dtype=torch.float32)
+                    actions = torch.tensor(np.array(actions), dtype=torch.long).view(-1, 1)
+                    # next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
+                    rewards = torch.tensor(np.array(rewards), dtype=torch.float32).view(-1, 1)
                     
-                    # print(target_q_values)
-                    target_max_q_values, _ = torch.max(target_q_values, dim=1, keepdim=True)
-                    # print(target_max_q_values)
-                    targets = torch.tensor([rewards[i] + gamma * target_max_q_values[i] for i in range(len(rewards))])
+                    with torch.no_grad():
+                        # Calculates the target Q-values using the target Q-network.
+                        target_q_values = torch.stack([q_network(next_state) for next_state in next_states])
 
-                # Calculates the Q-values for the selected actions in the current Q-network.
-                q_values = torch.stack([q_network(state) for state in states])
-                selected_q_values = torch.gather(q_values, 1, actions)
-                
-                # Hubber loss - between the predicted Q-values and the target Q-values.
-                loss = criterion(selected_q_values, targets)
-                print("Backpropogation...")
-                # Backpropagation and optimization steps to update the Q-network parameters.
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            total_interactions=0
+                        target_max_q_values, _ = torch.max(target_q_values, dim=1, keepdim=False)
+            
+                        targets = torch.tensor([rewards[i] + gamma * target_max_q_values[i] for i in range(len(rewards))])
+                        targ_resize = (len(targets),1)
+                        targets = targets.view(targ_resize)
+                    # Calculates the Q-values for the selected actions in the current Q-network.
+                    q_values = torch.stack([q_network(state) for state in states])
+                    selected_q_values = torch.gather(q_values, 1, actions)
+                    
+                    # Hubber loss - between the predicted Q-values and the target Q-values.
+                    loss = criterion(selected_q_values, targets)
+                    print("Backpropogation...")
+                    # Backpropagation and optimization steps to update the Q-network parameters.
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    total_interactions=0
+                except:
+                    print("Skipping bad batch")
+                    continue
             torch.save(q_network.state_dict(),PT_NAME)
-            # Update target Q-network
-            # target_q_network.load_state_dict(q_network.state_dict())
-
             experience_replay = []  # Clear experience replay buffer
         ep.reset()
         # write_to_csv(filename=file_name,episode=i,data=rewards)
     return q_network
 
+def run_policy(client:airsim.MultirotorClient,episode_number:int):
+    done = False
+    crashed = False
+    q_network = DQNetwork().to(device=device)
+    ep = Episode(client=client,n=episode_number)
+    state = ep.state.get_inputs()
+    while not(done or crashed):
+        state = ep.state.get_inputs()
+        with torch.no_grad():
+            q_val = q_network(state)
+        q_val = q_val.detach().numpy()
+        skip = 0
+        action = np.argmax(q_val[skip:])+skip #epsilon_greedy(q_val,0.1)#
+        print(action)
+        next_state, reward, done = ep.step(a=action)
+        # if reward<0:
+        #     print("Collision")
+        #     return
+        if done:
+            print("Goal Reached")
+            return
+        ep.state = next_state
+    ep.reset()
 
 
 # Call airsim below
