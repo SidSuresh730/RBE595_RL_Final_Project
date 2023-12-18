@@ -14,3 +14,6 @@ The model can be run from the drone_sim.py script.
 Inside the script there are three sections called **Testing**, **Debugging** and **Training**.
 1. To see the drone fly using the most recently trained neural network, uncomment the **Testing** section
 2. To train the drone, uncomment the **Training** section. 
+## Other
+1. Rewards for the training data are in **rewards_final.csv**.
+2. Trained network is in **dqn.pt**.
